@@ -65,11 +65,12 @@ COMPONENT_ORDER = [
 COMPONENT_META = {
     "weights":         {"label": "Weights",      "color": 68,  "char": "█"},
     "kv_cache":        {"label": "KV Cache",     "color": 208, "char": "▓"},
-    "prompt_cache":    {"label": "Prompt Cache", "color": 141, "char": "▞"},
-    "recurrent_state": {"label": "RS State",     "color": 99,  "char": "▣"},
+    "prompt_cache":    {"label": "Prompt Cache", "color": 141, "char": "█"},
+    "recurrent_state": {"label": "RS State",     "color": 99,  "char": "▓"},
     "compute_pp":      {"label": "Compute PP",   "color": 160, "char": "▒"},
     "compute":         {"label": "Compute",      "color": 71,  "char": "░"},
 }
+
 
 KIND_TO_COMPONENT = {
     "model":      "weights",
