@@ -27,7 +27,6 @@ def load_json(path: str) -> dict:
 def parse_cli_args(cli_args: str) -> dict:
     if cli_args == "N/A":
         return {}
-
     args = {}
     patterns = {
         "ngl": r"-ngl\s+(\d+)",
@@ -39,18 +38,11 @@ def parse_cli_args(cli_args: str) -> dict:
         "t": r"-t\s+(\d+)",
         "np": r"-np\s+(\d+)",
     }
-
     for key, pattern in patterns.items():
         match = re.search(pattern, cli_args)
         if match:
             args[key] = match.group(1)
-
     return args
-
-def diff_flag(a: str, b: str, flag_name: str) -> str:
-    if a == b:
-        return f"{a}"
-    return f"{RED}{a}{RESET} → {GREEN}{b}{RESET}"
 
 def model_meta_lines(data: dict) -> list[str]:
     info = data.get("model", {}) or {}
@@ -96,6 +88,15 @@ def draw_bar(used: float, cap: float, width: int = 40) -> str:
     filled = round(ratio * width)
     return f"{CYAN}{'█' * filled}{RESET}{DIM}{'░' * (width - filled)}{RESET}"
 
+def visual_len(s: str) -> int:
+    return len(re.sub(r'\033\[[0-9;]*m', '', s))
+
+def pad_to(s: str, width: int) -> str:
+    vl = visual_len(s)
+    if vl >= width:
+        return s
+    return s + " " * (width - vl)
+
 def main():
     if len(sys.argv) != 3:
         print("Usage: ./llama-mem-diff.py a.json b.json")
@@ -104,43 +105,49 @@ def main():
     a = load_json(sys.argv[1])
     b = load_json(sys.argv[2])
 
-    term_width = max(88, shutil.get_terminal_size((120, 40)).columns)
+    term_width = max(100, shutil.get_terminal_size((120, 40)).columns)
+    cell_w = (term_width - 3) // 2
+
     title = " LLAMA.CPP MEMORY DIFF "
     print(f"\n{CYAN}{'═' * ((term_width - len(title)) // 2)}{RESET}{BOLD}{title}{RESET}{CYAN}{'═' * ((term_width - len(title)) // 2)}{RESET}\n")
 
-    # Side-by-side config
-    meta_a = model_meta_lines(a)
-    meta_b = model_meta_lines(b)
+    # ── Row 1: Run A | Run B ──
+    lines_a = [f" {BOLD}{CYAN}RUN A{RESET}"] + [f" {l}" for l in model_meta_lines(a)]
+    lines_b = [f" {BOLD}{YELLOW}RUN B{RESET}"] + [f" {l}" for l in model_meta_lines(b)]
 
-    box_w = (term_width - 6) // 2
-    print(f"┌─ {BOLD}{CYAN}RUN A{RESET} {'─' * (box_w - 10)}┐   ┌─ {BOLD}{YELLOW}RUN B{RESET} {'─' * (box_w - 10)}┐")
-    for la, lb in zip(meta_a, meta_b):
-        la = la[:box_w-4].ljust(box_w-4)
-        lb = lb[:box_w-4].ljust(box_w-4)
-        print(f"│ {la} │   │ {lb} │")
-    print(f"└{'─' * (box_w - 2)}┘   └{'─' * (box_w - 2)}┘")
+    max_r1 = max(len(lines_a), len(lines_b))
+    lines_a += [""] * (max_r1 - len(lines_a))
+    lines_b += [""] * (max_r1 - len(lines_b))
 
-    # Memory pools
+    # ── Row 2: OVERVIEW | MEMORY BREAKDOWN ──
+    bar_w = max(10, cell_w - 22)
+
+    lines_vram = [f" {BOLD}OVERVIEW{RESET}", ""]
     for pool in ["VRAM", "RAM"]:
         t1 = a["allocated"][pool]["total_mib"]
         t2 = b["allocated"][pool]["total_mib"]
-        cap = max(a["allocated"][pool].get("capacity_mib", 0), b["allocated"][pool].get("capacity_mib", 0))
+        cap = max(a["allocated"][pool].get("capacity_mib", 0),
+                  b["allocated"][pool].get("capacity_mib", 0))
         diff = t2 - t1
 
-        bar1 = draw_bar(t1, cap)
-        bar2 = draw_bar(t2, cap)
+        bar1 = draw_bar(t1, cap, width=bar_w)
+        bar2 = draw_bar(t2, cap, width=bar_w)
 
-        diff_str = f"{GREEN}▼ {fmt_mem(diff)} (-{abs(diff/t1)*100:.1f}%)" if diff < 0 else f"{RED}▲ +{fmt_mem(diff)} (+{diff/t1*100:.1f}%)" if t1 > 0 else f"{RED}▲ +{fmt_mem(diff)}"
+        if diff < 0:
+            diff_str = f"{GREEN}▼ {fmt_mem(diff)} (-{abs(diff/t1)*100:.1f}%){RESET}" if t1 > 0 else f"{GREEN}▼ {fmt_mem(diff)}{RESET}"
+        elif diff > 0:
+            diff_str = f"{RED}▲ +{fmt_mem(diff)} (+{diff/t1*100:.1f}%){RESET}" if t1 > 0 else f"{RED}▲ +{fmt_mem(diff)}{RESET}"
+        else:
+            diff_str = f"{DIM}no change{RESET}"
 
-        print(f"\n{BOLD}{pool} OVERVIEW{RESET}")
-        print(f"  A: [{bar1}] {fmt_mem(t1):>11}")
-        print(f"  B: [{bar2}] {fmt_mem(t2):>11}")
-        print(f"  Δ: {diff_str}")
+        lines_vram.append(f" {BOLD}{pool}{RESET}")
+        lines_vram.append(f"  A:[{bar1}] {fmt_mem(t1)}")
+        lines_vram.append(f"  B:[{bar2}] {fmt_mem(t2)}")
+        lines_vram.append(f"  Δ: {diff_str}")
+        lines_vram.append("")
 
-    # Component diff
-    print(f"\n{DIM}{'─' * term_width}{RESET}")
-    print(f"{BOLD}{'COMPONENT BREAKDOWN':^{term_width}}{RESET}")
-    print(f"{DIM}{'─' * term_width}{RESET}")
+    # ── Memory breakdown ──
+    lines_comp = [f" {BOLD}MEMORY BREAKDOWN{RESET}", ""]
 
     comps = ["weights", "kv_cache", "prompt_cache", "recurrent_state", "compute_pp", "compute"]
     for comp in comps:
@@ -151,25 +158,42 @@ def main():
 
         diff = vb - va
         diff_pct = f"({diff/va*100:+.1f}%)" if va > 0 else ""
-        
+
         if abs(diff) < 0.01:
-            # No change → dim the entire line
-            label = f"{DIM} ● {comp.ljust(15)} A: {fmt_mem(va):>10} → B: {fmt_mem(vb):>10} → no change{RESET}"
-            print(label)
+            lines_comp.append(f"  {DIM}● {comp.ljust(14)} {fmt_mem(va)}  ──{RESET}")
         elif diff < 0:
-            print(f" ● {comp.ljust(15)} A: {fmt_mem(va):>10} → B: {fmt_mem(vb):>10} → {GREEN}▼ {fmt_mem(diff)} {diff_pct}{RESET}")
+            lines_comp.append(f"  ● {comp.ljust(14)} {fmt_mem(va)} → {fmt_mem(vb)} {GREEN}▼ {diff_pct}{RESET}")
         else:
-            print(f" ● {comp.ljust(15)} A: {fmt_mem(va):>10} → B: {fmt_mem(vb):>10} → {RED}▲ +{fmt_mem(diff)} {diff_pct}{RESET}")
+            lines_comp.append(f"  ● {comp.ljust(14)} {fmt_mem(va)} → {fmt_mem(vb)} {RED}▲ {diff_pct}{RESET}")
 
     # Total
     total_a = a["grand_total_mib"]
     total_b = b["grand_total_mib"]
     total_diff = total_b - total_a
-    print(f"\n{BOLD}TOTAL MEMORY USAGE{RESET}")
-    print(f"  A: {fmt_mem(total_a)}")
-    print(f"  B: {fmt_mem(total_b)}")
     diff_color = GREEN if total_diff < 0 else RED
-    print(f"  Δ: {diff_color}{fmt_mem(total_diff)} ({total_diff/total_a*100:+.1f}%){RESET}")
+    lines_comp.append("")
+    lines_comp.append(f" {BOLD}TOTAL MEMORY{RESET}")
+    lines_comp.append(f"  A: {fmt_mem(total_a)}")
+    lines_comp.append(f"  B: {fmt_mem(total_b)}")
+    lines_comp.append(f"  Δ: {diff_color}{fmt_mem(total_diff)} ({total_diff/total_a*100:+.1f}%){RESET}")
+
+    max_r2 = max(len(lines_vram), len(lines_comp))
+    lines_vram += [""] * (max_r2 - len(lines_vram))
+    lines_comp += [""] * (max_r2 - len(lines_comp))
+
+    # ── Draw grid ──
+    top = "┌" + "─" * cell_w + "┬" + "─" * cell_w + "┐"
+    mid = "├" + "─" * cell_w + "┼" + "─" * cell_w + "┤"
+    bot = "└" + "─" * cell_w + "┴" + "─" * cell_w + "┘"
+
+    print(top)
+    for la, lb in zip(lines_a, lines_b):
+        print(f"│{pad_to(la, cell_w)}│{pad_to(lb, cell_w)}│")
+    print(mid)
+    for lv, lc in zip(lines_vram, lines_comp):
+        print(f"│{pad_to(lv, cell_w)}│{pad_to(lc, cell_w)}│")
+    print(bot)
+
     print(f"{DIM}{'═' * term_width}{RESET}\n")
 
 if __name__ == "__main__":
