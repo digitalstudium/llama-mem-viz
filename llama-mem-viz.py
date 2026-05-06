@@ -277,8 +277,9 @@ class MemoryData:
         agg = self.get_aggregated()
         failure_cat, remaining_mib, deficit_mib = estimate_shortfall_mib(self)
         return {
-            "model": self.model_info,
-            "system_memory_mib": {k: round(v, 2) for k, v in sorted(self.system_memory.items())},
+            "cli_args": getattr(self, "cli_args", "N/A"),  # ← добавлено
+            "model": self.model_info,        
+            "system_memory_mib": {k: round(v, 2) for k, v in sorted(self.system_memory.items())},        
             "allocated": {
                 cat: {
                     "components_mib": {k: round(v, 2) for k, v in sorted(agg.get(cat, {}).items())},
@@ -983,12 +984,16 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     return p.parse_known_args()
 
 
+# В начале main()
 def main() -> None:
     global USE_COLOR
 
     args, llama_args = parse_args()
     if args.no_color:
         USE_COLOR = False
+
+    # Сохраняем полную командную строку
+    cli_args = " ".join(llama_args) if llama_args else ""
 
     if args.log:
         data = collect_from_file(args.log, debug=args.debug)
@@ -1008,11 +1013,13 @@ def main() -> None:
             debug=args.debug,
         )
 
+    # Добавляем аргументы в объект
+    data.cli_args = cli_args
+
     if args.json:
         print(json.dumps(data.to_dict(), indent=2, ensure_ascii=False))
     else:
         visualize(data)
-
 
 if __name__ == "__main__":
     main()

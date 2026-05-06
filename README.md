@@ -5,6 +5,7 @@
 It parses the llama.cpp startup log output in real time and helps you understand memory allocation by component, GPU offloading behavior, and **Out-Of-Memory (OOM)** / allocation failures.
 
 ![tool output](./output.png)
+![diff output](./diff_output.png)
 
 ## Features
 
