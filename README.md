@@ -1,8 +1,10 @@
-# llama_mem_viz
+# llama-mem-viz
 
-`llama_mem_viz` is a lightweight stdlib-only Python tool for visualizing RAM/VRAM usage of `llama.cpp` (`llama-server` or `llama-cli`).
+`llama-mem-viz` is a lightweight stdlib-only Python tool for visualizing RAM/VRAM usage of `llama.cpp` (`llama-server` or `llama-cli`).
 
 It parses `llama-server `logs in real time and helps identify memory usage, GPU offloading behavior, and Out-Of-Memory (OOM) failures.
+
+![tool output](./output.png)
 
 ## Features
 
@@ -22,8 +24,8 @@ It parses `llama-server `logs in real time and helps identify memory usage, GPU 
 ```bash
 git clone https://github.com/digitalstudium/llama-mem-viz.git
 cd llama-mem-viz
-chmod +x llama_mem_viz.py
-pyton3 llama_mem_viz.py
+chmod +x llama-mem-viz.py
+pyton3 llama-mem-viz.py
 
 ## Usage
 
@@ -32,7 +34,7 @@ pyton3 llama_mem_viz.py
 Pass normal llama-server arguments directly to the script:
 
 ```bash
-./llama_mem_viz.py -m model.gguf -c 65536 -ngl 40
+./llama-mem-viz.py -m model.gguf -c 65536 -ngl 40
 ```
 
 ## Example bash script

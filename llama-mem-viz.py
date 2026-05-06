@@ -1,4 +1,4 @@
-!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 llama-mem-viz.py — stdlib-only memory visualization for llama.cpp (RAM / VRAM),
 accounting for out-of-memory errors (OOM / failed to allocate / cudaMalloc failed).
