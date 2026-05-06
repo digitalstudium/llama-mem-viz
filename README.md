@@ -26,6 +26,7 @@ git clone https://github.com/digitalstudium/llama-mem-viz.git
 cd llama-mem-viz
 chmod +x llama-mem-viz.py
 pyton3 llama-mem-viz.py
+```
 
 ## Usage
 
