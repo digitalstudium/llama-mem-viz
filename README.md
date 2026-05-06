@@ -2,7 +2,7 @@
 
 `llama-mem-viz` is a lightweight, stdlib-only Python utility for inspecting RAM/VRAM usage in `llama.cpp` (`llama-server` or `llama-cli`).
 
-It reads startup log output in real time and helps you see how memory is distributed between weights, KV cache, and compute buffers, along with GPU offloading behavior and memory allocation failures.
+It reads startup log output and helps you see how memory is distributed between **weights**, **KV cache**, and **compute buffers**, along with **GPU offloading** behavior and memory allocation failures.
 
 ![tool output](./output.png)
 ![diff output](./diff_output.png)
