@@ -902,7 +902,8 @@ def visualize(data: MemoryData) -> None:
         print(f"  {'─' * (term_width - 4)}")
 
         stacked = render_stacked_bar(comps, components, bar_w)
-        print(f"  {' ' * label_w}┤{stacked}│")
+        label_total = "Total".ljust(label_w)
+        print(f"  {c(BOLD)}{label_total}{c(RESET)}┤{stacked}│ {c(BOLD)}{fmt_mem(total):>10} 100.0%{c(RESET)}")
 
         for comp in components:
             mib = comps.get(comp, 0.0)
