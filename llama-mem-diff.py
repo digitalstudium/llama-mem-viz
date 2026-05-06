@@ -2,6 +2,7 @@
 """
 llama-mem-diff.py — professional visual diff between two llama-mem-viz runs
 Shows difference in ALL important flags: -ngl, -ncmoe, -ub, -fa, -ctk, -ctv, etc.
+Memory breakdown shows VRAM, RAM, and Total separately.
 """
 
 import json
@@ -97,6 +98,16 @@ def pad_to(s: str, width: int) -> str:
         return s
     return s + " " * (width - vl)
 
+def fmt_diff(va: float, vb: float) -> str:
+    diff = vb - va
+    diff_pct = f"({diff/va*100:+.1f}%)" if va > 0 else ""
+    if abs(diff) < 0.01:
+        return f"{DIM}── no change{RESET}"
+    elif diff < 0:
+        return f"{GREEN}▼ {fmt_mem(diff)} {diff_pct}{RESET}"
+    else:
+        return f"{RED}▲ +{fmt_mem(diff)} {diff_pct}{RESET}"
+
 def main():
     if len(sys.argv) != 3:
         print("Usage: ./llama-mem-diff.py a.json b.json")
@@ -146,36 +157,55 @@ def main():
         lines_vram.append(f"  Δ: {diff_str}")
         lines_vram.append("")
 
-    # ── Memory breakdown ──
+    # ── Memory breakdown: VRAM / RAM / Total per component ──
     lines_comp = [f" {BOLD}MEMORY BREAKDOWN{RESET}", ""]
 
     comps = ["weights", "kv_cache", "prompt_cache", "recurrent_state", "compute_pp", "compute"]
     for comp in comps:
-        va = a["allocated"]["VRAM"]["components_mib"].get(comp, 0) + a["allocated"]["RAM"]["components_mib"].get(comp, 0)
-        vb = b["allocated"]["VRAM"]["components_mib"].get(comp, 0) + b["allocated"]["RAM"]["components_mib"].get(comp, 0)
-        if va == 0 and vb == 0:
+        va_vram = a["allocated"]["VRAM"]["components_mib"].get(comp, 0)
+        va_ram  = a["allocated"]["RAM"]["components_mib"].get(comp, 0)
+        vb_vram = b["allocated"]["VRAM"]["components_mib"].get(comp, 0)
+        vb_ram  = b["allocated"]["RAM"]["components_mib"].get(comp, 0)
+
+        va_total = va_vram + va_ram
+        vb_total = vb_vram + vb_ram
+
+        if va_total == 0 and vb_total == 0:
             continue
 
-        diff = vb - va
-        diff_pct = f"({diff/va*100:+.1f}%)" if va > 0 else ""
+        lines_comp.append(f"  {BOLD}● {comp}{RESET}")
 
-        if abs(diff) < 0.01:
-            lines_comp.append(f"  {DIM}● {comp.ljust(14)} {fmt_mem(va)}  ──{RESET}")
-        elif diff < 0:
-            lines_comp.append(f"  ● {comp.ljust(14)} {fmt_mem(va)} → {fmt_mem(vb)} {GREEN}▼ {diff_pct}{RESET}")
-        else:
-            lines_comp.append(f"  ● {comp.ljust(14)} {fmt_mem(va)} → {fmt_mem(vb)} {RED}▲ {diff_pct}{RESET}")
+        for label, va, vb in [("VRAM", va_vram, vb_vram),
+                               ("RAM",  va_ram,  vb_ram),
+                               ("Total", va_total, vb_total)]:
+            if va == 0 and vb == 0:
+                continue
+            diff_line = fmt_diff(va, vb)
+            lines_comp.append(f"    {label.ljust(6)} {fmt_mem(va)} → {fmt_mem(vb)}  {diff_line}")
 
-    # Total
+        lines_comp.append("")
+
+    # ── Total summary: VRAM / RAM / Total ──
+    total_a_vram = a["allocated"]["VRAM"]["total_mib"]
+    total_a_ram  = a["allocated"]["RAM"]["total_mib"]
+    total_b_vram = b["allocated"]["VRAM"]["total_mib"]
+    total_b_ram  = b["allocated"]["RAM"]["total_mib"]
     total_a = a["grand_total_mib"]
     total_b = b["grand_total_mib"]
-    total_diff = total_b - total_a
-    diff_color = GREEN if total_diff < 0 else RED
-    lines_comp.append("")
+
     lines_comp.append(f" {BOLD}TOTAL MEMORY{RESET}")
-    lines_comp.append(f"  A: {fmt_mem(total_a)}")
-    lines_comp.append(f"  B: {fmt_mem(total_b)}")
-    lines_comp.append(f"  Δ: {diff_color}{fmt_mem(total_diff)} ({total_diff/total_a*100:+.1f}%){RESET}")
+    lines_comp.append("")
+
+    for label, ta, tb in [("VRAM", total_a_vram, total_b_vram),
+                           ("RAM",  total_a_ram,  total_b_ram),
+                           ("Total", total_a, total_b)]:
+        diff = tb - ta
+        diff_color = GREEN if diff < 0 else (RED if diff > 0 else DIM)
+        diff_pct = f"({diff/ta*100:+.1f}%)" if ta > 0 else ""
+        if abs(diff) < 0.01:
+            lines_comp.append(f"  {DIM}{label.ljust(6)} {fmt_mem(ta)}  ── no change{RESET}")
+        else:
+            lines_comp.append(f"  {label.ljust(6)} {fmt_mem(ta)} → {fmt_mem(tb)}  {diff_color}{fmt_mem(diff)} {diff_pct}{RESET}")
 
     max_r2 = max(len(lines_vram), len(lines_comp))
     lines_vram += [""] * (max_r2 - len(lines_vram))
