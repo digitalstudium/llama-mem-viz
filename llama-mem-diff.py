@@ -53,8 +53,6 @@ def extract_meta(data: dict) -> dict:
         "arch": info.get("arch", "N/A"),
         "quant": info.get("file_type", "N/A"),
         "ctx": str(info.get("ctx", "N/A")),
-        "offloaded": str(info.get("layers_offloaded", "N/A")),
-        "total_layers": str(info.get("layers_total", "N/A")),
         "status": "ready" if data.get("status", {}).get("server_ready") else "failed",
         "ngl": parsed.get("ngl", "N/A"),
         "ncmoe": parsed.get("ncmoe", "N/A"),
@@ -84,23 +82,11 @@ def colorize_value(val_a: str, val_b: str, is_status: bool = False) -> tuple[str
         return f"{YELLOW}{BOLD}{val_a}{RESET}", f"{YELLOW}{BOLD}{val_b}{RESET}"
     return val_a, val_b
 
-def format_split_line(l_label: str, l_val: str, r_label: str, r_val: str) -> str:
-    """Создает идеально выровненную двухколоночную строку с разделителем '┆'."""
-    def pad_val(text: str, width: int) -> str:
-        v_len = visual_len(text)
-        if v_len >= width:
-            return text
-        return text + " " * (width - v_len)
-        
-    part1_label = f"{DIM}{l_label:<5}{RESET}"
-    part1_val = pad_val(l_val, 12)
-    
-    sep = f"{GRAY}┆{RESET} "
-    
-    part2_label = f"{DIM}{r_label:<6}{RESET}"
-    part2_val = r_val
-    
-    return f"  {part1_label} {part1_val} {sep}{part2_label} {part2_val}"
+def format_split_line(l_label: str, l_val: str, r_label: str, r_val: str, half_w: int) -> str:
+    """Создает идеально выровненную двухколоночную строку с разделителем '┆' по центру."""
+    left_part = f"{DIM}{l_label}{RESET} {l_val}"
+    right_part = f"{DIM}{r_label}{RESET} {r_val}"
+    return f"  {pad_to(left_part, half_w)}{GRAY}┆{RESET}  {right_part}"
 
 def generate_compact_meta_rows(a: dict, b: dict, cell_w: int) -> tuple[list[str], list[str]]:
     """Генерирует ультра-красивый и компактный блок метаданных."""
@@ -118,14 +104,6 @@ def generate_compact_meta_rows(a: dict, b: dict, cell_w: int) -> tuple[list[str]
         arch_a, arch_b = f"{YELLOW}{BOLD}{arch_a}{RESET}", f"{YELLOW}{BOLD}{arch_b}{RESET}"
     
     ctx_a, ctx_b = cv("ctx")
-    
-    gpu_val_a = f"{ma['offloaded']}/{ma['total_layers']}"
-    gpu_val_b = f"{mb['offloaded']}/{mb['total_layers']}"
-    if gpu_val_a != gpu_val_b:
-        gpu_a, gpu_b = f"{YELLOW}{BOLD}{gpu_val_a}{RESET}", f"{YELLOW}{BOLD}{gpu_val_b}{RESET}"
-    else:
-        gpu_a, gpu_b = gpu_val_a, gpu_val_b
-        
     status_a, status_b = cv("status", is_status=True)
     
     ngl_a, ngl_b = cv("ngl")
@@ -133,8 +111,16 @@ def generate_compact_meta_rows(a: dict, b: dict, cell_w: int) -> tuple[list[str]
     ub_a, ub_b = cv("ub")
     fa_a, fa_b = cv("fa")
     
-    ctk_a, ctk_b = cv("ctk")
-    ctv_a, ctv_b = cv("ctv")
+    # Объединяем ctk и ctv в один красивый параметр ctk/ctv
+    ctk_ctv_a = f"{ma['ctk']}/{ma['ctv']}"
+    ctk_ctv_b = f"{mb['ctk']}/{mb['ctv']}"
+    if ctk_ctv_a != ctk_ctv_b:
+        ctk_ctv_a = f"{YELLOW}{BOLD}{ctk_ctv_a}{RESET}"
+        ctk_ctv_b = f"{YELLOW}{BOLD}{ctk_ctv_b}{RESET}"
+
+    # Расчет точной половины ячейки для центрирования разделителя ┆
+    # Вычитаем отступы по краям (2 пробела слева, 4 у разделителя)
+    half_w = (cell_w - 6) // 2
 
     # Тонкий красивый горизонтальный разделитель
     div_line = f" {GRAY}{'─' * (cell_w - 4)}{RESET}"
@@ -149,10 +135,9 @@ def generate_compact_meta_rows(a: dict, b: dict, cell_w: int) -> tuple[list[str]
         f"  {DIM}Model:{RESET}    {name_a}",
         f"  {DIM}Arch:{RESET}     {arch_a}",
         div_line,
-        format_split_line("Ctx:", ctx_a, "ngl:", ngl_a),
-        format_split_line("GPU:", gpu_a, "ncmoe:", ncmoe_a),
-        format_split_line("ctk:", ctk_a, "ub:", ub_a),
-        format_split_line("ctv:", ctv_a, "fa:", fa_a),
+        format_split_line("Ctx:", ctx_a, "ngl:", ngl_a, half_w),
+        format_split_line("ctk/ctv:", ctk_ctv_a, "ub:", ub_a, half_w),
+        format_split_line("fa:", fa_a, "ncmoe:", ncmoe_a, half_w),
         div_line,
         f"  {DIM}Status:{RESET}   {status_a}"
     ]
@@ -163,10 +148,9 @@ def generate_compact_meta_rows(a: dict, b: dict, cell_w: int) -> tuple[list[str]
         f"  {DIM}Model:{RESET}    {name_b}",
         f"  {DIM}Arch:{RESET}     {arch_b}",
         div_line,
-        format_split_line("Ctx:", ctx_b, "ngl:", ngl_b),
-        format_split_line("GPU:", gpu_b, "ncmoe:", ncmoe_b),
-        format_split_line("ctk:", ctk_b, "ub:", ub_b),
-        format_split_line("ctv:", ctv_b, "fa:", fa_b),
+        format_split_line("Ctx:", ctx_b, "ngl:", ngl_b, half_w),
+        format_split_line("ctk/ctv:", ctk_ctv_b, "ub:", ub_b, half_w),
+        format_split_line("fa:", fa_b, "ncmoe:", ncmoe_b, half_w),
         div_line,
         f"  {DIM}Status:{RESET}   {status_b}"
     ]
@@ -210,7 +194,7 @@ def main():
     pad_len = (term_width - len(title)) // 2
     print(f"\n{CYAN}{'═' * pad_len}{RESET}{BOLD}{title}{RESET}{CYAN}{'═' * pad_len}{RESET}\n")
 
-    # ── Row 1: Run A | Run B (Новый адаптивный Layout) ──
+    # ── Row 1: Run A | Run B (Улучшенный, ультра-компактный Layout) ──
     lines_a, lines_b = generate_compact_meta_rows(a, b, cell_w)
 
     max_r1 = max(len(lines_a), len(lines_b))
