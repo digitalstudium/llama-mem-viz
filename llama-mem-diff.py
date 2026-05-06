@@ -36,8 +36,6 @@ def parse_cli_args(cli_args: str) -> dict:
         "fa": r"-fa\s+(on|off)",
         "ctk": r"-ctk\s+(\w+)",
         "ctv": r"-ctv\s+(\w+)",
-        "t": r"-t\s+(\d+)",
-        "np": r"-np\s+(\d+)",
     }
     for key, pattern in patterns.items():
         match = re.search(pattern, cli_args)
@@ -46,7 +44,6 @@ def parse_cli_args(cli_args: str) -> dict:
     return args
 
 def extract_meta(data: dict) -> dict:
-    """Извлекает чистые параметры для сравнения."""
     info = data.get("model", {}) or {}
     cli_args = data.get("cli_args", "N/A")
     parsed = parse_cli_args(cli_args)
@@ -67,59 +64,113 @@ def extract_meta(data: dict) -> dict:
         "ctv": parsed.get("ctv", "N/A"),
     }
 
-def generate_meta_rows(a: dict, b: dict) -> tuple[list[str], list[str]]:
-    """Генерирует списки строк для левой и правой колонок с подсветкой различий."""
-    meta_a = extract_meta(a)
-    meta_b = extract_meta(b)
+def visual_len(s: str) -> int:
+    return len(re.sub(r'\033\[[0-9;]*m', '', s))
 
-    lines_a = [f" {BOLD}{CYAN}RUN A{RESET}"]
-    lines_b = [f" {BOLD}{YELLOW}RUN B{RESET}"]
+def pad_to(s: str, width: int) -> str:
+    vl = visual_len(s)
+    if vl >= width:
+        return s
+    return s + " " * (width - vl)
 
-    def add_compared_line(label: str, val_a: str, val_b: str, is_status: bool = False):
-        if is_status:
-            # Специфический статус-контроль (failed -> красный, ready -> зеленый)
-            formatted_a = f"{GREEN}{BOLD}{val_a}{RESET}" if val_a == "ready" else f"{RED}{BOLD}{val_a}{RESET}"
-            formatted_b = f"{GREEN}{BOLD}{val_b}{RESET}" if val_b == "ready" else f"{RED}{BOLD}{val_b}{RESET}"
-        else:
-            # Если значения отличаются, подсвечиваем их желтым цветом
-            if val_a != val_b:
-                formatted_a = f"{YELLOW}{BOLD}{val_a}{RESET}"
-                formatted_b = f"{YELLOW}{BOLD}{val_b}{RESET}"
-            else:
-                formatted_a = val_a
-                formatted_b = val_b
-
-        lines_a.append(f" {label:<12} {formatted_a}")
-        lines_b.append(f" {label:<12} {formatted_b}")
-
-    # Сравнение базовой информации
-    add_compared_line("Model:", meta_a["name"], meta_b["name"])
+def colorize_value(val_a: str, val_b: str, is_status: bool = False) -> tuple[str, str]:
+    """Возвращает пару отформатированных значений с подсветкой различий."""
+    if is_status:
+        fmt_a = f"{GREEN}● {val_a}{RESET}" if val_a == "ready" else f"{RED}{BOLD}● {val_a}{RESET}"
+        fmt_b = f"{GREEN}● {val_b}{RESET}" if val_b == "ready" else f"{RED}{BOLD}● {val_b}{RESET}"
+        return fmt_a, fmt_b
     
-    arch_a = f"{meta_a['arch']} ({meta_a['quant']})"
-    arch_b = f"{meta_b['arch']} ({meta_b['quant']})"
-    add_compared_line("Arch:", arch_a, arch_b)
+    if val_a != val_b:
+        return f"{YELLOW}{BOLD}{val_a}{RESET}", f"{YELLOW}{BOLD}{val_b}{RESET}"
+    return val_a, val_b
+
+def format_split_line(l_label: str, l_val: str, r_label: str, r_val: str) -> str:
+    """Создает идеально выровненную двухколоночную строку с разделителем '┆'."""
+    def pad_val(text: str, width: int) -> str:
+        v_len = visual_len(text)
+        if v_len >= width:
+            return text
+        return text + " " * (width - v_len)
+        
+    part1_label = f"{DIM}{l_label:<5}{RESET}"
+    part1_val = pad_val(l_val, 12)
     
-    add_compared_line("Context:", meta_a["ctx"], meta_b["ctx"])
+    sep = f"{GRAY}┆{RESET} "
     
-    gpu_a = f"{meta_a['offloaded']}/{meta_a['total_layers']}"
-    gpu_b = f"{meta_b['offloaded']}/{meta_b['total_layers']}"
-    add_compared_line("GPU layers:", gpu_a, gpu_b)
+    part2_label = f"{DIM}{r_label:<6}{RESET}"
+    part2_val = r_val
     
-    # Статус выводим с флагом is_status=True
-    add_compared_line("Status:", meta_a["status"], meta_b["status"], is_status=True)
+    return f"  {part1_label} {part1_val} {sep}{part2_label} {part2_val}"
 
-    # Разделитель перед параметрами запуска
-    lines_a.append("")
-    lines_b.append("")
+def generate_compact_meta_rows(a: dict, b: dict, cell_w: int) -> tuple[list[str], list[str]]:
+    """Генерирует ультра-красивый и компактный блок метаданных."""
+    ma = extract_meta(a)
+    mb = extract_meta(b)
+    
+    def cv(key, is_status=False):
+        return colorize_value(ma[key], mb[key], is_status)
+    
+    name_a, name_b = cv("name")
+    
+    arch_a = f"{ma['arch']} ({ma['quant']})"
+    arch_b = f"{mb['arch']} ({mb['quant']})"
+    if arch_a != arch_b:
+        arch_a, arch_b = f"{YELLOW}{BOLD}{arch_a}{RESET}", f"{YELLOW}{BOLD}{arch_b}{RESET}"
+    
+    ctx_a, ctx_b = cv("ctx")
+    
+    gpu_val_a = f"{ma['offloaded']}/{ma['total_layers']}"
+    gpu_val_b = f"{mb['offloaded']}/{mb['total_layers']}"
+    if gpu_val_a != gpu_val_b:
+        gpu_a, gpu_b = f"{YELLOW}{BOLD}{gpu_val_a}{RESET}", f"{YELLOW}{BOLD}{gpu_val_b}{RESET}"
+    else:
+        gpu_a, gpu_b = gpu_val_a, gpu_val_b
+        
+    status_a, status_b = cv("status", is_status=True)
+    
+    ngl_a, ngl_b = cv("ngl")
+    ncmoe_a, ncmoe_b = cv("ncmoe")
+    ub_a, ub_b = cv("ub")
+    fa_a, fa_b = cv("fa")
+    
+    ctk_a, ctk_b = cv("ctk")
+    ctv_a, ctv_b = cv("ctv")
 
-    # Сравнение CLI флагов
-    for flag in ["ngl", "ncmoe", "ub", "fa"]:
-        add_compared_line(f"{flag}:", meta_a[flag], meta_b[flag])
+    # Тонкий красивый горизонтальный разделитель
+    div_line = f" {GRAY}{'─' * (cell_w - 4)}{RESET}"
 
-    ctk_ctv_a = f"{meta_a['ctk']}/{meta_a['ctv']}"
-    ctk_ctv_b = f"{meta_b['ctk']}/{meta_b['ctv']}"
-    add_compared_line("ctk/ctv:", ctk_ctv_a, ctk_ctv_b)
+    # Заголовки запусков
+    header_a = f" {BOLD}{CYAN}◉ RUN A{RESET}"
+    header_b = f" {BOLD}{YELLOW}◉ RUN B{RESET}"
 
+    lines_a = [
+        header_a,
+        div_line,
+        f"  {DIM}Model:{RESET}    {name_a}",
+        f"  {DIM}Arch:{RESET}     {arch_a}",
+        div_line,
+        format_split_line("Ctx:", ctx_a, "ngl:", ngl_a),
+        format_split_line("GPU:", gpu_a, "ncmoe:", ncmoe_a),
+        format_split_line("ctk:", ctk_a, "ub:", ub_a),
+        format_split_line("ctv:", ctv_a, "fa:", fa_a),
+        div_line,
+        f"  {DIM}Status:{RESET}   {status_a}"
+    ]
+    
+    lines_b = [
+        header_b,
+        div_line,
+        f"  {DIM}Model:{RESET}    {name_b}",
+        f"  {DIM}Arch:{RESET}     {arch_b}",
+        div_line,
+        format_split_line("Ctx:", ctx_b, "ngl:", ngl_b),
+        format_split_line("GPU:", gpu_b, "ncmoe:", ncmoe_b),
+        format_split_line("ctk:", ctk_b, "ub:", ub_b),
+        format_split_line("ctv:", ctv_b, "fa:", fa_b),
+        div_line,
+        f"  {DIM}Status:{RESET}   {status_b}"
+    ]
+    
     return lines_a, lines_b
 
 def fmt_mem(mib: float) -> str:
@@ -133,15 +184,6 @@ def draw_bar(used: float, cap: float, width: int = 40) -> str:
     ratio = min(1.0, used / cap)
     filled = round(ratio * width)
     return f"{CYAN}{'█' * filled}{RESET}{DIM}{'░' * (width - filled)}{RESET}"
-
-def visual_len(s: str) -> int:
-    return len(re.sub(r'\033\[[0-9;]*m', '', s))
-
-def pad_to(s: str, width: int) -> str:
-    vl = visual_len(s)
-    if vl >= width:
-        return s
-    return s + " " * (width - vl)
 
 def fmt_diff(va: float, vb: float) -> str:
     diff = vb - va
@@ -165,10 +207,11 @@ def main():
     cell_w = (term_width - 3) // 2
 
     title = " LLAMA.CPP MEMORY DIFF "
-    print(f"\n{CYAN}{'═' * ((term_width - len(title)) // 2)}{RESET}{BOLD}{title}{RESET}{CYAN}{'═' * ((term_width - len(title)) // 2)}{RESET}\n")
+    pad_len = (term_width - len(title)) // 2
+    print(f"\n{CYAN}{'═' * pad_len}{RESET}{BOLD}{title}{RESET}{CYAN}{'═' * pad_len}{RESET}\n")
 
-    # ── Row 1: Run A | Run B ──
-    lines_a, lines_b = generate_meta_rows(a, b)
+    # ── Row 1: Run A | Run B (Новый адаптивный Layout) ──
+    lines_a, lines_b = generate_compact_meta_rows(a, b, cell_w)
 
     max_r1 = max(len(lines_a), len(lines_b))
     lines_a += [""] * (max_r1 - len(lines_a))
@@ -249,8 +292,7 @@ def main():
                                ("Total", va_total, vb_total)]:
             diff_line = fmt_diff(va, vb)
             if label == "Total":
-                colored_diff = diff_line.replace(RESET, CYAN)
-                lines_comp.append(f"    {CYAN}Total {RESET}{CYAN}{fmt_mem(va)} → {fmt_mem(vb)}  {colored_diff}{RESET}")
+                lines_comp.append(f"    {CYAN}Total{RESET} {fmt_mem(va)} → {fmt_mem(vb)}  {diff_line}")
             else:
                 lines_comp.append(f"    {label.ljust(6)} {fmt_mem(va)} → {fmt_mem(vb)}  {diff_line}")
 
