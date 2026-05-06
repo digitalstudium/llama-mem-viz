@@ -45,37 +45,82 @@ def parse_cli_args(cli_args: str) -> dict:
             args[key] = match.group(1)
     return args
 
-def model_meta_lines(data: dict) -> list[str]:
+def extract_meta(data: dict) -> dict:
+    """Извлекает чистые параметры для сравнения."""
     info = data.get("model", {}) or {}
     cli_args = data.get("cli_args", "N/A")
     parsed = parse_cli_args(cli_args)
+    
+    return {
+        "name": info.get("name", "N/A"),
+        "arch": info.get("arch", "N/A"),
+        "quant": info.get("file_type", "N/A"),
+        "ctx": str(info.get("ctx", "N/A")),
+        "offloaded": str(info.get("layers_offloaded", "N/A")),
+        "total_layers": str(info.get("layers_total", "N/A")),
+        "status": "ready" if data.get("status", {}).get("server_ready") else "failed",
+        "ngl": parsed.get("ngl", "N/A"),
+        "ncmoe": parsed.get("ncmoe", "N/A"),
+        "ub": parsed.get("ub", "N/A"),
+        "fa": parsed.get("fa", "N/A"),
+        "ctk": parsed.get("ctk", "N/A"),
+        "ctv": parsed.get("ctv", "N/A"),
+    }
 
-    name = info.get("name", "N/A")
-    arch = info.get("arch", "N/A")
-    quant = info.get("file_type", "N/A")
-    ctx = info.get("ctx", "N/A")
-    offloaded = info.get("layers_offloaded", "N/A")
-    total_layers = info.get("layers_total", "N/A")
-    status = "ready" if data.get("status", {}).get("server_ready") else "failed"
+def generate_meta_rows(a: dict, b: dict) -> tuple[list[str], list[str]]:
+    """Генерирует списки строк для левой и правой колонок с подсветкой различий."""
+    meta_a = extract_meta(a)
+    meta_b = extract_meta(b)
 
-    lines = [
-        f"Model:      {name}",
-        f"Arch:       {arch} ({quant})",
-        f"Context:    {ctx}",
-        f"GPU layers: {offloaded}/{total_layers}",
-        f"Status:     {status}",
-    ]
+    lines_a = [f" {BOLD}{CYAN}RUN A{RESET}"]
+    lines_b = [f" {BOLD}{YELLOW}RUN B{RESET}"]
 
-    if parsed:
-        lines += [
-            f"ngl:        {parsed.get('ngl', 'N/A')}",
-            f"ncmoe:      {parsed.get('ncmoe', 'N/A')}",
-            f"ub:         {parsed.get('ub', 'N/A')}",
-            f"fa:         {parsed.get('fa', 'N/A')}",
-            f"ctk/ctv:    {parsed.get('ctk', 'N/A')}/{parsed.get('ctv', 'N/A')}",
-        ]
+    def add_compared_line(label: str, val_a: str, val_b: str, is_status: bool = False):
+        if is_status:
+            # Специфический статус-контроль (failed -> красный, ready -> зеленый)
+            formatted_a = f"{GREEN}{BOLD}{val_a}{RESET}" if val_a == "ready" else f"{RED}{BOLD}{val_a}{RESET}"
+            formatted_b = f"{GREEN}{BOLD}{val_b}{RESET}" if val_b == "ready" else f"{RED}{BOLD}{val_b}{RESET}"
+        else:
+            # Если значения отличаются, подсвечиваем их желтым цветом
+            if val_a != val_b:
+                formatted_a = f"{YELLOW}{BOLD}{val_a}{RESET}"
+                formatted_b = f"{YELLOW}{BOLD}{val_b}{RESET}"
+            else:
+                formatted_a = val_a
+                formatted_b = val_b
 
-    return lines
+        lines_a.append(f" {label:<12} {formatted_a}")
+        lines_b.append(f" {label:<12} {formatted_b}")
+
+    # Сравнение базовой информации
+    add_compared_line("Model:", meta_a["name"], meta_b["name"])
+    
+    arch_a = f"{meta_a['arch']} ({meta_a['quant']})"
+    arch_b = f"{meta_b['arch']} ({meta_b['quant']})"
+    add_compared_line("Arch:", arch_a, arch_b)
+    
+    add_compared_line("Context:", meta_a["ctx"], meta_b["ctx"])
+    
+    gpu_a = f"{meta_a['offloaded']}/{meta_a['total_layers']}"
+    gpu_b = f"{meta_b['offloaded']}/{meta_b['total_layers']}"
+    add_compared_line("GPU layers:", gpu_a, gpu_b)
+    
+    # Статус выводим с флагом is_status=True
+    add_compared_line("Status:", meta_a["status"], meta_b["status"], is_status=True)
+
+    # Разделитель перед параметрами запуска
+    lines_a.append("")
+    lines_b.append("")
+
+    # Сравнение CLI флагов
+    for flag in ["ngl", "ncmoe", "ub", "fa"]:
+        add_compared_line(f"{flag}:", meta_a[flag], meta_b[flag])
+
+    ctk_ctv_a = f"{meta_a['ctk']}/{meta_a['ctv']}"
+    ctk_ctv_b = f"{meta_b['ctk']}/{meta_b['ctv']}"
+    add_compared_line("ctk/ctv:", ctk_ctv_a, ctk_ctv_b)
+
+    return lines_a, lines_b
 
 def fmt_mem(mib: float) -> str:
     if abs(mib) >= 1024:
@@ -123,8 +168,7 @@ def main():
     print(f"\n{CYAN}{'═' * ((term_width - len(title)) // 2)}{RESET}{BOLD}{title}{RESET}{CYAN}{'═' * ((term_width - len(title)) // 2)}{RESET}\n")
 
     # ── Row 1: Run A | Run B ──
-    lines_a = [f" {BOLD}{CYAN}RUN A{RESET}"] + [f" {l}" for l in model_meta_lines(a)]
-    lines_b = [f" {BOLD}{YELLOW}RUN B{RESET}"] + [f" {l}" for l in model_meta_lines(b)]
+    lines_a, lines_b = generate_meta_rows(a, b)
 
     max_r1 = max(len(lines_a), len(lines_b))
     lines_a += [""] * (max_r1 - len(lines_a))
@@ -157,7 +201,7 @@ def main():
         lines_vram.append(f"  Δ: {diff_str}")
         lines_vram.append("")
 
-    # Total memory with bars (moved into OVERVIEW, no VRAM/RAM duplication)
+    # Total memory
     total_a = a["grand_total_mib"]
     total_b = b["grand_total_mib"]
     total_cap = (
@@ -182,7 +226,7 @@ def main():
     lines_vram.append(f"  Δ: {diff_str}")
     lines_vram.append("")
 
-    # ── Memory breakdown: VRAM / RAM / Total per component ──
+    # ── Memory breakdown ──
     lines_comp = [f" {BOLD}MEMORY BREAKDOWN{RESET}", ""]
 
     comps = ["weights", "kv_cache", "prompt_cache", "recurrent_state", "compute_pp", "compute"]
