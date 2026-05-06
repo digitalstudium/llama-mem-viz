@@ -1,14 +1,14 @@
-#!/usr/bin/env python3
+!/usr/bin/env python3
 """
-llama_mem_viz.py — stdlib-only memory visualization for llama.cpp (RAM / VRAM),
+llama-mem-viz.py — stdlib-only memory visualization for llama.cpp (RAM / VRAM),
 accounting for out-of-memory errors (OOM / failed to allocate / cudaMalloc failed).
 
 Examples:
-  python llama_mem_viz.py -m model.gguf -c 65536 -ngl 40
-  python llama_mem_viz.py -m model.gguf -c 65536 -ngl 40 --save-log llama.log
-  python llama_mem_viz.py -m model.gguf -c 65536 -ngl 40 --show-log
-  python llama_mem_viz.py --log llama.log
-  python llama_mem_viz.py --log llama.log --json
+  python llama-mem-viz.py -m model.gguf -c 65536 -ngl 40
+  python llama-mem-viz.py -m model.gguf -c 65536 -ngl 40 --save-log llama.log
+  python llama-mem-viz.py -m model.gguf -c 65536 -ngl 40 --show-log
+  python llama-mem-viz.py --log llama.log
+  python llama-mem-viz.py --log llama.log --json
 """
 
 import argparse
