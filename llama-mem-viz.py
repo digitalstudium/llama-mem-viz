@@ -56,26 +56,26 @@ def strip_ansi(s: str) -> str:
 COMPONENT_ORDER = [
     "weights",
     "kv_cache",
+    "prompt_cache",
     "recurrent_state",
     "compute_pp",
     "compute",
-    "output",
 ]
 
 COMPONENT_META = {
-    "weights":         {"label": "Weights",    "color": 68,  "char": "█"},
-    "kv_cache":        {"label": "KV Cache",   "color": 208, "char": "▓"},
-    "recurrent_state": {"label": "RS State",   "color": 99,  "char": "▣"},
-    "compute_pp":      {"label": "Compute PP", "color": 160, "char": "▒"},
-    "compute":         {"label": "Compute",    "color": 71,  "char": "░"},
-    "output":          {"label": "Output",     "color": 141, "char": "▪"},
+    "weights":         {"label": "Weights",      "color": 68,  "char": "█"},
+    "kv_cache":        {"label": "KV Cache",     "color": 208, "char": "▓"},
+    "prompt_cache":    {"label": "Prompt Cache", "color": 141, "char": "▞"},
+    "recurrent_state": {"label": "RS State",     "color": 99,  "char": "▣"},
+    "compute_pp":      {"label": "Compute PP",   "color": 160, "char": "▒"},
+    "compute":         {"label": "Compute",      "color": 71,  "char": "░"},
 }
 
 KIND_TO_COMPONENT = {
     "model":      "weights",
     "kv":         "kv_cache",
     "rs":         "recurrent_state",
-    "output":     "output",
+    "output":     "compute",       # Map output to compute since it's tiny (~1MB)
     "compute":    "compute",
     "compute pp": "compute_pp",
 }
@@ -104,6 +104,11 @@ BUFFER_RE = re.compile(
     (?P<unit>KiB|MiB|GiB|KB|MB|GB)
     """,
     re.IGNORECASE | re.VERBOSE,
+)
+
+PROMPT_CACHE_RE = re.compile(
+    r"prompt\s+cache\s+is\s+enabled,\s+size\s+limit:\s*(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>KiB|MiB|GiB|KB|MB|GB)",
+    re.IGNORECASE,
 )
 
 GGUF_KV_RE = re.compile(
@@ -355,11 +360,10 @@ def failure_score(line: str) -> int:
 
 
 def component_specificity(component: str) -> int:
-    # Used to prioritize more specific component information for error diagnostics
     order = {
         "compute": 1,
         "weights": 1,
-        "output": 1,
+        "prompt_cache": 1,
         "kv_cache": 1,
         "recurrent_state": 1,
         "compute_pp": 2,
@@ -376,7 +380,7 @@ def infer_failed_component(line: str) -> str | None:
     if "kv cache" in low or "kv buffer" in low:
         return "kv_cache"
     if "output layer" in low or "output buffer" in low:
-        return "output"
+        return "compute"
     if "recurrent" in low or "rs buffer" in low:
         return "recurrent_state"
     if "model buffer" in low:
@@ -392,8 +396,7 @@ def infer_failed_category(line: str, component: str | None = None) -> str | None
     if "cpu" in low or "host" in low or "ram" in low:
         return "RAM"
 
-    # If not explicitly stated, compute/kv/output/compute_pp allocations usually target VRAM
-    if component in {"compute_pp", "compute", "kv_cache", "output"}:
+    if component in {"compute_pp", "compute", "kv_cache"}:
         return "VRAM"
 
     return None
@@ -466,14 +469,6 @@ def should_stop(line: str) -> bool:
 
 
 def estimate_shortfall_mib(data: MemoryData) -> tuple[str | None, float | None, float | None]:
-    """
-    Returns:
-      (category, remaining_mib, deficit_mib)
-
-    category: 'VRAM', 'RAM', or None
-    remaining_mib: Estimated free memory overhead at execution start
-    deficit_mib: Estimated deficit needed to satisfy the failed request
-    """
     if not data.fatal_error:
         return None, None, None
 
@@ -486,7 +481,7 @@ def estimate_shortfall_mib(data: MemoryData) -> tuple[str | None, float | None, 
         elif "cpu" in low or "host" in low or "ram" in low:
             cat = "RAM"
         elif data.failed_component in COMPONENT_ORDER:
-            cat = "RAM" if data.failed_component == "weights" else "VRAM"
+            cat = "RAM" if data.failed_component in {"weights", "prompt_cache"} else "VRAM"
 
     if cat is None:
         return None, None, None
@@ -524,6 +519,7 @@ def parse_line(line: str, data: MemoryData, debug: bool = False) -> None:
     if m := CUDA_FREE_RE.search(line):
         data.system_memory["VRAM_FREE"] = to_mib(float(m.group("value")), m.group("unit"))
 
+    # Parse buffers
     for m in BUFFER_RE.finditer(line):
         device = normalize_device(m.group("device"))
         kind   = normalize_kind(m.group("kind"))
@@ -539,6 +535,16 @@ def parse_line(line: str, data: MemoryData, debug: bool = False) -> None:
 
         if debug:
             print(f"{fg(244)}[match]{c(RESET)} dev={device} comp={comp} mib={mib:.2f}", file=sys.stderr)
+
+    # Parse Prompt Cache
+    if m := PROMPT_CACHE_RE.search(line):
+        value = float(m.group("value"))
+        unit  = m.group("unit")
+        mib   = to_mib(value, unit)
+        data.add_raw("CPU", "prompt_cache", mib)
+
+        if debug:
+            print(f"{fg(244)}[match]{c(RESET)} dev=CPU comp=prompt_cache mib={mib:.2f}", file=sys.stderr)
 
     if m := GGUF_KV_RE.search(line):
         key   = m.group("key").strip()
