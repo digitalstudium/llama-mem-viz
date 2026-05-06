@@ -1,8 +1,8 @@
 # llama-mem-viz
 
-`llama-mem-viz` is a lightweight stdlib-only Python tool for visualizing RAM/VRAM usage of `llama.cpp` (`llama-server` or `llama-cli`).
+`llama-mem-viz` is a lightweight, **stdlib-only** Python tool that visualizes **RAM/VRAM** memory usage of **llama.cpp** (`llama-server` or `llama-cli`).
 
-It parses `llama-server `logs in real time and helps identify memory usage, GPU offloading behavior, and Out-Of-Memory (OOM) failures.
+It parses the llama.cpp startup log output in real time and helps you understand memory allocation by component, GPU offloading behavior, and **Out-Of-Memory (OOM)** / allocation failures.
 
 ![tool output](./output.png)
 
@@ -12,12 +12,21 @@ It parses `llama-server `logs in real time and helps identify memory usage, GPU 
 - Per-component breakdown:
   - Weights
   - KV Cache
-  - Compute buffers
-  - Output buffers
-  - Recurrent state
+  - Prompt Cache
+  - Recurrent State
+  - Compute buffers (incl. Compute PP)
 - OOM / allocation failure detection
-- JSON output mode
-- No external dependencies (`pip install` not required)
+- JSON output mode (`--json`)
+- No external dependencies (no `pip install` required)
+
+## Requirements
+
+- Python 3.10+ recommended (should work on most Python 3 versions)
+- `llama-server` or `llama-cli` available on `PATH` (or use `--binary`)
+- Linux recommended (tested on Linux)
+
+Optional:
+- `nvidia-smi` for VRAM total/free detection
 
 ## Installation
 
@@ -25,28 +34,59 @@ It parses `llama-server `logs in real time and helps identify memory usage, GPU 
 git clone https://github.com/digitalstudium/llama-mem-viz.git
 cd llama-mem-viz
 chmod +x llama-mem-viz.py
-pyton3 llama-mem-viz.py
+chmod +x llama-mem-diff.py
 ```
 
 ## Usage
 
-### Run together with llama-server
+### Visualize a single run
 
-Pass normal llama-server arguments directly to the script:
+Pass regular `llama-server` / `llama-cli` arguments directly to the script:
 
 ```bash
 ./llama-mem-viz.py -m model.gguf -c 65536 -ngl 40
 ```
 
-## Example bash script
+If you want machine-readable output:
+
+```bash
+./llama-mem-viz.py --json -m model.gguf -c 65536 -ngl 40 > run.json
+```
+
+### Example scripts
+
+#### `visualize.sh`
+
+Run your predefined single visualization scenario:
 
 ```bash
 ./visualize.sh
 ```
 
-## Windows / macOS note
+#### `compare.sh` (two runs + visual diff)
 
-This project was developed and tested on Linux only.
+This repo includes a simple hardcoded comparison workflow:
 
-Windows and macOS support is currently untested and may be partially broken.
+1. Run configuration A → `a.json`
+2. Run configuration B → `b.json`
+3. Visualize the diff between them
+
+Run it:
+
+```bash
+./compare.sh
+```
+
+The current `compare.sh` looks like this (example):
+
+```bash
+./llama-mem-viz.py --json -m /path/to/model.gguf ... -ub 2048 > a.json
+./llama-mem-viz.py --json -m /path/to/model.gguf ... -ub 512  > b.json
+./llama-mem-diff.py a.json b.json
+```
+
+### Notes
+
+- Memory numbers can vary slightly between runs due to allocator state / fragmentation.
+- On non-Linux platforms (Windows/macOS) behavior is currently untested and may be partially broken.
 

@@ -6,6 +6,6 @@
 	--mlock \
 	-ctk q8_0 -ctv q8_0 \
 	-t 8 \
-	-ub 512 \
+	-ub 2048 \
 	-np 1
 
