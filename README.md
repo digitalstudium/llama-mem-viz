@@ -19,16 +19,11 @@ It parses `llama-server `logs in real time and helps identify memory usage, GPU 
 
 ## Installation
 
-No installation is required.
-
-1. Download `llama_mem_viz.py`
-2. (Optional) make it executable:
-
 ```bash
+git clone https://github.com/digitalstudium/llama-mem-viz.git
+cd llama-mem-viz
 chmod +x llama_mem_viz.py
-```
-
-3. Run with Python 3.10+
+pyton3 llama_mem_viz.py
 
 ## Usage
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-llama_mem_viz.py — stdlib-only визуализация памяти llama.cpp (RAM / VRAM),
-с учётом нехватки памяти (OOM / failed to allocate / cudaMalloc failed).
+llama_mem_viz.py — stdlib-only memory visualization for llama.cpp (RAM / VRAM),
+accounting for out-of-memory errors (OOM / failed to allocate / cudaMalloc failed).
 
-Примеры:
+Examples:
   python llama_mem_viz.py -m model.gguf -c 65536 -ngl 40
   python llama_mem_viz.py -m model.gguf -c 65536 -ngl 40 --save-log llama.log
   python llama_mem_viz.py -m model.gguf -c 65536 -ngl 40 --show-log
@@ -23,7 +23,7 @@ from pathlib import Path
 
 
 # ─────────────────────────────────────────────────────────────
-# ANSI
+# ANSI Colors
 # ─────────────────────────────────────────────────────────────
 
 USE_COLOR = sys.stdout.isatty()
@@ -50,7 +50,7 @@ def strip_ansi(s: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# Компоненты памяти
+# Memory Components
 # ─────────────────────────────────────────────────────────────
 
 COMPONENT_ORDER = [
@@ -82,7 +82,7 @@ KIND_TO_COMPONENT = {
 
 
 # ─────────────────────────────────────────────────────────────
-# Regex
+# Regex Patterns
 # ─────────────────────────────────────────────────────────────
 
 BUFFER_RE = re.compile(
@@ -126,13 +126,13 @@ OFFLOADED_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Реальные фатальные ошибки памяти
+# Real fatal memory errors
 OOM_RE = re.compile(
     r"(out of memory|cudaMalloc failed|failed to allocate|failed to initialize the context)",
     re.IGNORECASE,
 )
 
-# Не фатально: memlock-limit, не путать с OOM
+# Non-fatal warning: memlock-limit (not to be confused with a fatal OOM)
 MLOCK_WARNING_RE = re.compile(
     r"failed to mlock .*cannot allocate memory",
     re.IGNORECASE,
@@ -167,7 +167,7 @@ STOP_MARKERS = [
 
 
 # ─────────────────────────────────────────────────────────────
-# Data
+# Data Containers
 # ─────────────────────────────────────────────────────────────
 
 @dataclass
@@ -232,7 +232,7 @@ class MemoryData:
                 self.failed_alloc_mib = alloc_mib
 
     def get_aggregated(self) -> dict[str, dict[str, float]]:
-        """Агрегирует в две корзины: VRAM и RAM."""
+        """Aggregates memory into two main pools: VRAM and RAM."""
         result: dict[str, dict[str, float]] = {"VRAM": {}, "RAM": {}}
 
         for dev, comps in self.raw_devices.items():
@@ -300,7 +300,7 @@ class MemoryData:
 
 
 # ─────────────────────────────────────────────────────────────
-# Utils
+# Utilities
 # ─────────────────────────────────────────────────────────────
 
 def to_mib(value: float, unit: str) -> float:
@@ -355,7 +355,7 @@ def failure_score(line: str) -> int:
 
 
 def component_specificity(component: str) -> int:
-    # Чем больше — тем конкретнее/полезнее для сообщения
+    # Used to prioritize more specific component information for error diagnostics
     order = {
         "compute": 1,
         "weights": 1,
@@ -392,7 +392,7 @@ def infer_failed_category(line: str, component: str | None = None) -> str | None
     if "cpu" in low or "host" in low or "ram" in low:
         return "RAM"
 
-    # Если не сказано явно, но это compute/kv/output/compute_pp — почти всегда GPU-часть
+    # If not explicitly stated, compute/kv/output/compute_pp allocations usually target VRAM
     if component in {"compute_pp", "compute", "kv_cache", "output"}:
         return "VRAM"
 
@@ -467,12 +467,12 @@ def should_stop(line: str) -> bool:
 
 def estimate_shortfall_mib(data: MemoryData) -> tuple[str | None, float | None, float | None]:
     """
-    Возвращает:
-      (cat, remaining_mib, deficit_mib)
+    Returns:
+      (category, remaining_mib, deficit_mib)
 
-    cat: VRAM/RAM или None
-    remaining_mib: оценка оставшегося запаса на момент запуска
-    deficit_mib: оценочный дефицит относительно последнего неудачного запроса
+    category: 'VRAM', 'RAM', or None
+    remaining_mib: Estimated free memory overhead at execution start
+    deficit_mib: Estimated deficit needed to satisfy the failed request
     """
     if not data.fatal_error:
         return None, None, None
@@ -486,7 +486,6 @@ def estimate_shortfall_mib(data: MemoryData) -> tuple[str | None, float | None, 
         elif "cpu" in low or "host" in low or "ram" in low:
             cat = "RAM"
         elif data.failed_component in COMPONENT_ORDER:
-            # Для compute/kv/output чаще всего VRAM
             cat = "RAM" if data.failed_component == "weights" else "VRAM"
 
     if cat is None:
@@ -508,17 +507,17 @@ def estimate_shortfall_mib(data: MemoryData) -> tuple[str | None, float | None, 
 
 
 # ─────────────────────────────────────────────────────────────
-# Parser
+# Parser Engines
 # ─────────────────────────────────────────────────────────────
 
 def parse_line(line: str, data: MemoryData, debug: bool = False) -> None:
     line = strip_ansi(line.rstrip("\n"))
 
-    # warnings that are not fatal OOM
+    # Warnings that are not fatal OOM events
     if MLOCK_WARNING_RE.search(line):
         data.note_warning(line)
 
-    # parse VRAM total/free from log if available
+    # Parse VRAM total/free from log metadata if available
     if m := CUDA_TOTAL_RE.search(line):
         data.system_memory["VRAM"] = to_mib(float(m.group("value")), m.group("unit"))
 
@@ -575,7 +574,7 @@ def parse_line(line: str, data: MemoryData, debug: bool = False) -> None:
         data.model_info["layers_offloaded"] = m.group(1)
         data.model_info["layers_total"]     = m.group(2)
 
-    # fatal memory errors
+    # Fatal memory allocation events
     if OOM_RE.search(line):
         component = infer_failed_component(line)
         category   = infer_failed_category(line, component=component)
@@ -598,7 +597,7 @@ def parse_line(line: str, data: MemoryData, debug: bool = False) -> None:
 
 
 # ─────────────────────────────────────────────────────────────
-# Sources
+# Log Sources
 # ─────────────────────────────────────────────────────────────
 
 BINARY_CANDIDATES = [
@@ -617,7 +616,7 @@ def find_binary() -> str:
         found = shutil.which(candidate)
         if found:
             return found
-    raise FileNotFoundError("Не найден llama-server/llama-cli.")
+    raise FileNotFoundError("Could not find llama-server or llama-cli binary.")
 
 
 def collect_from_process(
@@ -666,7 +665,7 @@ def collect_from_process(
 
             parse_line(line, data, debug=debug)
 
-            # Останавливаемся только когда сервер уже поднялся
+            # Stop scanning when server initiates/completes startup sequence
             if should_stop(line):
                 proc.terminate()
                 break
@@ -702,7 +701,7 @@ def collect_from_stdin(debug: bool = False) -> MemoryData:
 
 
 # ─────────────────────────────────────────────────────────────
-# Visualization
+# Visualization Layout
 # ─────────────────────────────────────────────────────────────
 
 def allocate_widths(values: list[float], width: int) -> list[int]:
@@ -802,20 +801,20 @@ def print_status_banner(
     print()
 
     if data.fatal_error:
-        print(f"{bg(160)}{fg(15)}  ⚠  СЕРВЕРУ НЕ ХВАТИЛО ПАМЯТИ / СБОЙ ЗАПУСКА  {c(RESET)}")
-        print(f"  {fg(196)}Причина:{c(RESET)} {data.fatal_error}")
+        print(f"{bg(160)}{fg(15)}  ⚠  SERVER OUT OF MEMORY / LAUNCH FAILED  {c(RESET)}")
+        print(f"  {fg(196)}Reason:{c(RESET)} {data.fatal_error}")
 
         if data.failed_component:
-            print(f"  {fg(196)}Затронутый узел:{c(RESET)} {COMPONENT_META[data.failed_component]['label']}")
+            print(f"  {fg(196)}Affected Component:{c(RESET)} {COMPONENT_META[data.failed_component]['label']}")
 
         if data.failed_alloc_mib is not None:
-            print(f"  {fg(196)}Последний запрос:{c(RESET)} {fmt_mem(data.failed_alloc_mib)}")
+            print(f"  {fg(196)}Last Allocation Request:{c(RESET)} {fmt_mem(data.failed_alloc_mib)}")
 
         if failure_cat is not None and remaining_mib is not None:
-            print(f"  {fg(196)}Оценка оставшегося запаса {failure_cat}:{c(RESET)} {fmt_mem(remaining_mib)}")
+            print(f"  {fg(196)}Estimated Remaining {failure_cat}:{c(RESET)} {fmt_mem(remaining_mib)}")
 
         if deficit_mib is not None and deficit_mib > 0:
-            print(f"  {fg(196)}Оценочный дефицит:{c(RESET)} {fmt_mem(deficit_mib)}")
+            print(f"  {fg(196)}Estimated Deficit:{c(RESET)} {fmt_mem(deficit_mib)}")
 
         if data.failure_lines:
             extras = [x for x in data.failure_lines if x != data.fatal_error][:2]
@@ -823,10 +822,10 @@ def print_status_banner(
                 print(f"  {c(DIM)}↳ {extra}{c(RESET)}")
 
         if data.server_ready:
-            print(f"  {c(DIM)}Сервер успел подняться, но затем упал.{c(RESET)}")
+            print(f"  {c(DIM)}The server started successfully but crashed afterwards.{c(RESET)}")
 
     elif data.warnings:
-        print(f"{bg(208)}{fg(0)}  ПРЕДУПРЕЖДЕНИЯ  {c(RESET)}")
+        print(f"{bg(208)}{fg(0)}  WARNINGS  {c(RESET)}")
 
     for w in data.warnings[-3:]:
         print(f"  {fg(208)}⚠ {w}{c(RESET)}")
@@ -839,7 +838,7 @@ def visualize(data: MemoryData) -> None:
     if not any(agg.values()):
         print_status_banner(data, failure_cat, remaining_mib, deficit_mib)
         if not (data.fatal_error or data.warnings):
-            print(f"\n{c(BOLD)}⚠  Данные о памяти не найдены.{c(RESET)}")
+            print(f"\n{c(BOLD)}⚠  No memory data found.{c(RESET)}")
         return
 
     term_width = max(80, shutil.get_terminal_size((120, 40)).columns)
@@ -849,7 +848,7 @@ def visualize(data: MemoryData) -> None:
     label_w = max(len(COMPONENT_META[comp]["label"]) for comp in components) + 2
     bar_w   = max(24, term_width - label_w - 34)
 
-    # Header
+    # Header Panel
     print()
     print(f"{c(BOLD)}{'═' * term_width}{c(RESET)}")
     print(f"{c(BOLD)}{'llama.cpp memory':^{term_width}}{c(RESET)}")
@@ -858,7 +857,7 @@ def visualize(data: MemoryData) -> None:
     print_model_header(data)
     print_status_banner(data, failure_cat, remaining_mib, deficit_mib)
 
-    # Legend
+    # Legend Panel
     print()
     print(sep)
     legend = "   ".join(
@@ -954,24 +953,24 @@ def visualize(data: MemoryData) -> None:
 
 
 # ─────────────────────────────────────────────────────────────
-# CLI
+# CLI Entry Point
 # ─────────────────────────────────────────────────────────────
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
     p = argparse.ArgumentParser(
-        description="Визуализация памяти llama.cpp (RAM / VRAM), с детектом OOM",
+        description="llama.cpp memory visualization (RAM / VRAM) with OOM detection",
     )
 
     src = p.add_mutually_exclusive_group()
-    src.add_argument("--log", type=Path, help="читать сохранённый лог")
-    src.add_argument("--stdin", action="store_true", help="читать stdin")
+    src.add_argument("--log", type=Path, help="read saved log file")
+    src.add_argument("--stdin", action="store_true", help="read from stdin")
 
-    p.add_argument("-b", "--binary", help="путь к llama-server/llama-cli")
-    p.add_argument("--show-log", action="store_true", help="печатать лог llama.cpp в stderr")
-    p.add_argument("--save-log", type=Path, help="сохранить лог llama.cpp в файл")
-    p.add_argument("--json", action="store_true", help="вывести JSON")
+    p.add_argument("-b", "--binary", help="path to llama-server or llama-cli binary")
+    p.add_argument("--show-log", action="store_true", help="print llama.cpp log to stderr")
+    p.add_argument("--save-log", type=Path, help="save llama.cpp log to file")
+    p.add_argument("--json", action="store_true", help="output JSON")
     p.add_argument("--debug", action="store_true", help="debug regex matches")
-    p.add_argument("--no-color", action="store_true", help="без ANSI цветов")
+    p.add_argument("--no-color", action="store_true", help="disable ANSI colors")
 
     return p.parse_known_args()
 
